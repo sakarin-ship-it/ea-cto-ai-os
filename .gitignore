@@ -1,5 +1,9 @@
 .env
 node_modules/
+dist/
+*.tsbuildinfo
 __pycache__/
 *.pyc
+*.egg-info/
+.DS_Store
 tests/reports/*.json
