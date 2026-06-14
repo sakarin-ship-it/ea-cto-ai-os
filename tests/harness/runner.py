@@ -138,12 +138,12 @@ def _preload_model(model_name: str = "qwen3-8b") -> bool:
 
 
 def _assert_single_model() -> None:
-    """Assert only one model is loaded in LM Studio (via /v1/models)."""
+    """Assert only one model is loaded in LM Studio (via /api/v0/models state filter)."""
     try:
         import httpx
-        resp = httpx.get("http://localhost:1234/v1/models", timeout=5.0)
+        resp = httpx.get("http://localhost:1234/api/v0/models", timeout=5.0)
         models = resp.json().get("data", [])
-        loaded = [m for m in models if m.get("object") == "model"]
+        loaded = [m for m in models if m.get("state") == "loaded"]
         if len(loaded) > 1:
             names = [m.get("id", "?") for m in loaded]
             raise RuntimeError(
@@ -151,6 +151,8 @@ def _assert_single_model() -> None:
                 "Only ONE model must be resident at a time (M5 16GB rule)."
             )
         _log(f"preload  model count OK ({len(loaded)} loaded)")
+    except RuntimeError:
+        raise
     except Exception as exc:
         _log(f"preload  model-count check skipped: {exc}")
 
