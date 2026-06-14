@@ -1,0 +1,228 @@
+{
+  "name": "W-02 Doc Auto-Ingest",
+  "nodes": [
+    {
+      "id": "w02-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "w02-doc-ingest-static",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "w02-doc-ingest",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "w02-set",
+      "name": "Set node",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field_file_path",
+              "name": "file_path",
+              "value": "={{ $json.file_path }}",
+              "type": "string"
+            },
+            {
+              "id": "field_doc_type",
+              "name": "doc_type",
+              "value": "={{ $json.doc_type }}",
+              "type": "string"
+            },
+            {
+              "id": "field_uploader",
+              "name": "uploader",
+              "value": "={{ $json.uploaded_by }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "w02-dis",
+      "name": "HTTP Request EA-DIS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        750,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8002/ingest",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NCoCayaGbWY3cbnL",
+          "name": "EA DIS Token"
+        }
+      }
+    },
+    {
+      "id": "w02-code",
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const item = $input.first().json;\nconst status = item.status || 'ingested';\nreturn [{ json: { ...item, status } }];"
+      }
+    },
+    {
+      "id": "w02-pg",
+      "name": "Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1250,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-02', 'W-02 Doc Auto-Ingest', '{{ $execution.id }}', '{{ $json.status }}', '{{ JSON.stringify($json) }}'::jsonb)",
+        "options": {}
+      }
+    },
+    {
+      "id": "w02-line",
+      "name": "HTTP Request LINE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Document ingested and classified \u2014 check ea_workflow_log\" with title \"EA-CTO\" subtitle \"W-02: Doc Ingest\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "w02-resp",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1750,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, status: $json.status }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Set node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set node": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request EA-DIS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request EA-DIS": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request LINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request LINE": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Bangkok",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

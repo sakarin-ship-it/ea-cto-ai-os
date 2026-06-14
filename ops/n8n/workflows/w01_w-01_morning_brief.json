@@ -1,0 +1,274 @@
+{
+  "name": "W-01 Morning Brief",
+  "nodes": [
+    {
+      "id": "w01-sched",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "w01-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        500
+      ],
+      "webhookId": "w01-test-static",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "w01-test",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      }
+    },
+    {
+      "id": "w01-fci",
+      "name": "FCI Anomalies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8001/anomalies?limit=5",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      }
+    },
+    {
+      "id": "w01-dis",
+      "name": "DIS Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        750,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8002/query",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\"query\":\"daily status\",\"top_k\":3}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NCoCayaGbWY3cbnL",
+          "name": "EA DIS Token"
+        }
+      }
+    },
+    {
+      "id": "w01-lie",
+      "name": "LIE Obligations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1000,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8003/obligations?days_ahead=7",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "i0Z2tJX72wWBSOL9",
+          "name": "EA LIE API Key"
+        }
+      }
+    },
+    {
+      "id": "w01-code",
+      "name": "Aggregate Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const today = $now.toISO().slice(0,10);\n\nlet fciData = 'unavailable';\nlet disData = 'unavailable';\nlet lieData = 'unavailable';\n\ntry { fciData = JSON.stringify($('FCI Anomalies').first().json).slice(0,200); } catch(e) {}\ntry { disData = JSON.stringify($('DIS Query').first().json).slice(0,200); } catch(e) {}\ntry { lieData = JSON.stringify($('LIE Obligations').first().json).slice(0,200); } catch(e) {}\n\nconst message = `\\nEA-CTO Morning Brief ${today}\\n` +\n  `--- FCI Anomalies ---\\n${fciData}\\n` +\n  `--- DIS RAG ---\\n${disData}\\n` +\n  `--- LIE Obligations (7d) ---\\n${lieData}`;\n\nreturn [{ json: { message, today, fciData, disData, lieData } }];"
+      }
+    },
+    {
+      "id": "w01-pg",
+      "name": "Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1500,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-01', 'W-01 Morning Brief', '={{ $execution.id }}', 'success', '{{ JSON.stringify({message: $json.message, today: $json.today}) }}'::jsonb)"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      }
+    },
+    {
+      "id": "w01-line",
+      "name": "LINE Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1750,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Morning brief ready \u2014 anomalies, obligations & RAG summary in n8n\" with title \"EA-CTO\" subtitle \"W-01: Morning Brief\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "FCI Anomalies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "FCI Anomalies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FCI Anomalies": {
+      "main": [
+        [
+          {
+            "node": "DIS Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DIS Query": {
+      "main": [
+        [
+          {
+            "node": "LIE Obligations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LIE Obligations": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Brief": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Postgres": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

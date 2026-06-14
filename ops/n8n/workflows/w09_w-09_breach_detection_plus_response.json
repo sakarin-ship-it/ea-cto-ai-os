@@ -1,0 +1,152 @@
+{
+  "name": "W-09 Breach Detection + Response",
+  "nodes": [
+    {
+      "id": "w09-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "w09-breach",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "w09-breach-static"
+    },
+    {
+      "id": "w09-breach",
+      "name": "EA-LIE Breach Monitor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8003/breach-monitor",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{JSON.stringify($json)}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "i0Z2tJX72wWBSOL9",
+          "name": "EA LIE API Key"
+        }
+      }
+    },
+    {
+      "id": "w09-code",
+      "name": "Build Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst lieResp = items[0]?.json || {};\nconst notice = lieResp.notice || lieResp.error || 'BREACH DETECTED';\nreturn [{ json: { message: 'BREACH ALERT: ' + String(notice).slice(0, 300), severity: lieResp.severity || 'HIGH' } }];"
+      }
+    },
+    {
+      "id": "w09-line-urgent",
+      "name": "LINE Notify URGENT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'tell application \"Messages\"' -e 'set s to 1st service whose service type = iMessage' -e 'set b to buddy \"s.akarin@icloud.com\" of s' -e 'send \"EA-CTO BREACH DETECTED \u2014 open n8n W-09 immediately\" to b' -e 'end tell'`);\n} catch(e) { /* iMessage non-fatal */ }\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "w09-pg",
+      "name": "Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1250,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-09', 'W-09 Breach Detection + Response', '{{ $execution.id }}', 'breach_notified', '{}') ON CONFLICT DO NOTHING"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "EA-LIE Breach Monitor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EA-LIE Breach Monitor": {
+      "main": [
+        [
+          {
+            "node": "Build Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Message": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify URGENT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LINE Notify URGENT": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

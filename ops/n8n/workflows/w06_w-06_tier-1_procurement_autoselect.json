@@ -1,0 +1,149 @@
+{
+  "name": "W-06 Tier-1 Procurement Autoselect",
+  "nodes": [
+    {
+      "id": "w06-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "w06-tier1-select-static",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "w06-tier1-select",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "w06-auto",
+      "name": "EA-PIP Autoselect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:8004/packages/{{$json.body.package_id}}/autoselect",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {}
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RH1WdQLyd6TaR2dm",
+          "name": "EA PIP API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w06-code",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const r = $json;\nreturn [{\n  json: {\n    po_reference: r.po_reference,\n    supplier: r.supplier_name || \"unknown\",\n    fci_po_id: r.fci_po_id || \"\",\n    message: \"Tier-1 selected: \" + (r.supplier_name || \"supplier\") + \" PO:\" + r.po_reference\n  }\n}];"
+      }
+    },
+    {
+      "id": "w06-pg",
+      "name": "Log to DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-06', 'W-06 Tier-1 Procurement Autoselect', '{{$execution.id}}', 'success', '{{JSON.stringify($json)}}'::jsonb)",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      }
+    },
+    {
+      "id": "w06-line",
+      "name": "LINE Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Tier-1 autoselect complete \u2014 PO created and sent to EA-FCI\" with title \"EA-CTO\" subtitle \"W-06: Tier-1\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "EA-PIP Autoselect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EA-PIP Autoselect": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Result": {
+      "main": [
+        [
+          {
+            "node": "Log to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to DB": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

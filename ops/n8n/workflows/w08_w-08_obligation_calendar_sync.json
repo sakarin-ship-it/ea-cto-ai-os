@@ -1,0 +1,151 @@
+{
+  "name": "W-08 Obligation Calendar Sync",
+  "nodes": [
+    {
+      "id": "w08-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "path": "w08-obligation-sync",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "webhookId": "w08-obligation-sync-static"
+    },
+    {
+      "id": "w08-obs",
+      "name": "Fetch Obligations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://localhost:8003/obligations?contract_id=' + $json.body.contract_id + '&days_ahead=' + ($json.body.days_ahead || 30) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {}
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "i0Z2tJX72wWBSOL9",
+          "name": "EA LIE API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w08-code",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const obs = Array.isArray($json) ? $json : ($json.obligations || []);\nconst daysAhead = $('Webhook').item.json.body.days_ahead || 30;\nconst msg = 'Obligation Sync: ' + obs.length + ' obligations in next ' + daysAhead + ' days';\nreturn [{ json: { message: msg, count: obs.length, obligations: obs.slice(0, 5) } }];"
+      }
+    },
+    {
+      "id": "w08-pg",
+      "name": "Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-08', 'W-08 Obligation Calendar Sync', '{{ $execution.id }}', 'obligation_synced', '{}') ON CONFLICT DO NOTHING"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w08-line",
+      "name": "LINE Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Obligation calendar synced \u2014 upcoming deadlines in n8n\" with title \"EA-CTO\" subtitle \"W-08: Obligations\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Fetch Obligations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Obligations": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Result": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Postgres": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "executionOrder": "v1"
+  },
+  "active": true
+}

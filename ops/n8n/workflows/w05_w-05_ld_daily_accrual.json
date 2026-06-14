@@ -1,0 +1,182 @@
+{
+  "name": "W-05: LD Daily Accrual",
+  "nodes": [
+    {
+      "id": "w05-sched",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 18,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "w05-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        460
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "w05-test",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      },
+      "webhookId": "w05-test-static",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w05-ld",
+      "name": "Get LD Accruals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8001/ld/accruals?limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {}
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w05-code",
+      "name": "Format Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst raw = items[0] ? items[0].json : {};\nconst data = Array.isArray(raw) ? raw : (raw.data || []);\nconst total = data.reduce((s, r) => s + (r.accrued_satang || 0), 0);\nconst msg = 'LD Accrual ' + $now.toISO().slice(0, 10) + ': ' + data.length + ' contracts total ' + total + ' satang';\nreturn [{ json: { message: msg, total_satang: total, count: data.length } }];"
+      }
+    },
+    {
+      "id": "w05-pg",
+      "name": "Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-05', 'W-05: LD Daily Accrual', '{{ $execution.id }}', 'success', '{{ JSON.stringify({message: $json.message, total_satang: $json.total_satang, count: $json.count}) }}'::jsonb)"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      }
+    },
+    {
+      "id": "w05-line",
+      "name": "LINE Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Daily LD accrual calculated \u2014 total satang in n8n W-05\" with title \"EA-CTO\" subtitle \"W-05: LD Accrual\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get LD Accruals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get LD Accruals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get LD Accruals": {
+      "main": [
+        [
+          {
+            "node": "Format Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Summary": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Postgres": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

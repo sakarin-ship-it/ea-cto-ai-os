@@ -1,0 +1,269 @@
+{
+  "name": "W-10 FIDIC Time-Bar Alert",
+  "nodes": [
+    {
+      "id": "w10-sched",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtHour": 19,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "w10-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        460
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "w10-test",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "webhookId": "w10-test-static"
+    },
+    {
+      "id": "w10-fidic",
+      "name": "EA-LIE FIDIC Timebar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8003/fidic/timebar-alerts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "days_ahead",
+              "value": "14"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "i0Z2tJX72wWBSOL9",
+          "name": "EA LIE API Key"
+        }
+      }
+    },
+    {
+      "id": "w10-code",
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        380
+      ],
+      "parameters": {
+        "jsCode": "const alerts=Array.isArray($json)?$json:($json.alerts||[]); const critical=alerts.filter(a=>a.days_remaining<=1).length; const urgent=alerts.filter(a=>a.days_remaining>1&&a.days_remaining<=7).length; const warning=alerts.filter(a=>a.days_remaining>7&&a.days_remaining<=14).length; const msg=\"FIDIC Time-Bar \"+$now.toISO().slice(0,10)+\": CRITICAL=\"+critical+\" URGENT=\"+urgent+\" WARNING=\"+warning; return [{json:{message:msg,critical,urgent,warning}}]"
+      }
+    },
+    {
+      "id": "w10-if",
+      "name": "IF",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        380
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json.critical > 0 || $json.urgent > 0}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      }
+    },
+    {
+      "id": "w10-urgent",
+      "name": "LINE Notify URGENT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        260
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'tell application \"Messages\"' -e 'set s to 1st service whose service type = iMessage' -e 'set b to buddy \"s.akarin@icloud.com\" of s' -e 'send \"EA-CTO FIDIC TIME-BAR IMMINENT \u2014 check W-10 in n8n now\" to b' -e 'end tell'`);\n} catch(e) { /* iMessage non-fatal */ }\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "w10-pg",
+      "name": "Postgres Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1250,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-10', 'W-10 FIDIC Time-Bar Alert', '{{ $execution.id }}', 'success', '{{ JSON.stringify($json) }}'::jsonb)"
+      }
+    },
+    {
+      "id": "w10-line",
+      "name": "LINE Notify Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"FIDIC time-bar daily check complete\" with title \"EA-CTO\" subtitle \"W-10: FIDIC\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "EA-LIE FIDIC Timebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "EA-LIE FIDIC Timebar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EA-LIE FIDIC Timebar": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "IF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify URGENT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LINE Notify URGENT": {
+      "main": [
+        [
+          {
+            "node": "Postgres Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Log": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Bangkok",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "active": true
+}

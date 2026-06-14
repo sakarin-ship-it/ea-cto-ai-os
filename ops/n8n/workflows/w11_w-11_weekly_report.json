@@ -1,0 +1,312 @@
+{
+  "name": "W-11 Weekly Report",
+  "nodes": [
+    {
+      "id": "w11-sched",
+      "name": "w11-sched",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "w11-wh",
+      "name": "w11-wh",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        500
+      ],
+      "webhookId": "w11-test-static",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "w11-test",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      }
+    },
+    {
+      "id": "w11-fci",
+      "name": "w11-fci",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8001/anomalies?limit=100",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      }
+    },
+    {
+      "id": "w11-pip",
+      "name": "w11-pip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        750,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8004/packages?limit=100",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RH1WdQLyd6TaR2dm",
+          "name": "EA PIP API Key"
+        }
+      }
+    },
+    {
+      "id": "w11-lie",
+      "name": "w11-lie",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1000,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8003/obligations?days_ahead=7",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "i0Z2tJX72wWBSOL9",
+          "name": "EA LIE API Key"
+        }
+      }
+    },
+    {
+      "id": "w11-dis",
+      "name": "w11-dis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1250,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8002/documents?limit=10",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NCoCayaGbWY3cbnL",
+          "name": "EA DIS Token"
+        }
+      }
+    },
+    {
+      "id": "w11-code",
+      "name": "w11-code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const weekDate = $now.toISO().slice(0, 10);\n\nconst fciData = $(\"w11-fci\").item.json;\nconst pipData = $(\"w11-pip\").item.json;\nconst lieData = $(\"w11-lie\").item.json;\nconst disData = $(\"w11-dis\").item.json;\n\nconst fciCount = Array.isArray(fciData) ? fciData.length : (fciData.total ?? fciData.count ?? (fciData.anomalies ? fciData.anomalies.length : 'N/A'));\nconst pipCount = Array.isArray(pipData) ? pipData.length : (pipData.total ?? pipData.count ?? (pipData.packages ? pipData.packages.length : 'N/A'));\nconst lieCount = Array.isArray(lieData) ? lieData.length : (lieData.total ?? lieData.count ?? (lieData.obligations ? lieData.obligations.length : 'N/A'));\nconst disCount = Array.isArray(disData) ? disData.length : (disData.total ?? disData.count ?? (disData.documents ? disData.documents.length : 'N/A'));\n\nconst report = '[W-11] Weekly Report ' + weekDate + '\\nFCI Anomalies: ' + fciCount + '\\nPIP Packages: ' + pipCount + '\\nLIE Obligations (7d): ' + lieCount + '\\nDIS Documents: ' + disCount;\n\nreturn [{ json: { message: report.slice(0, 1000) } }];"
+      }
+    },
+    {
+      "id": "w11-pg",
+      "name": "w11-pg",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1750,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-11', 'W-11 Weekly Report', '={{ $execution.id }}', 'success', '{{ JSON.stringify({message: $json.message}) }}'::jsonb)"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      }
+    },
+    {
+      "id": "w11-line",
+      "name": "w11-line",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Weekly management report ready \u2014 see n8n W-11 for full KPIs\" with title \"EA-CTO\" subtitle \"W-11: Weekly Report\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "w11-sched": {
+      "main": [
+        [
+          {
+            "node": "w11-fci",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-wh": {
+      "main": [
+        [
+          {
+            "node": "w11-fci",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-fci": {
+      "main": [
+        [
+          {
+            "node": "w11-pip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-pip": {
+      "main": [
+        [
+          {
+            "node": "w11-lie",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-lie": {
+      "main": [
+        [
+          {
+            "node": "w11-dis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-dis": {
+      "main": [
+        [
+          {
+            "node": "w11-code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-code": {
+      "main": [
+        [
+          {
+            "node": "w11-pg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "w11-pg": {
+      "main": [
+        [
+          {
+            "node": "w11-line",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

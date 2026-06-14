@@ -1,0 +1,266 @@
+{
+  "name": "W-04 AR Dunning",
+  "nodes": [
+    {
+      "id": "w04-sched",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtHour": 10,
+              "triggerAtMinute": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "w04-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        460
+      ],
+      "parameters": {
+        "path": "w04-test",
+        "httpMethod": "GET",
+        "responseMode": "lastNode"
+      },
+      "webhookId": "w04-test"
+    },
+    {
+      "id": "w04-inv",
+      "name": "Get Overdue Invoices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        380
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8001/invoices",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "OVERDUE"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      }
+    },
+    {
+      "id": "w04-code",
+      "name": "Build Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        380
+      ],
+      "parameters": {
+        "jsCode": "const invoices=Array.isArray($json)?$json:($json.data||[]); const msg=\"AR Dunning \"+$now.toISO().slice(0,10)+\": \"+invoices.length+\" overdue\"; return [{json:{message:msg,count:invoices.length}}]"
+      }
+    },
+    {
+      "id": "w04-if",
+      "name": "Has Overdue?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        380
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json.count}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "w04-line-alert",
+      "name": "LINE Alert Overdue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        260
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Overdue invoices found \u2014 AR dunning alert dispatched\" with title \"EA-CTO\" subtitle \"W-04: AR Dunning\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "w04-pg",
+      "name": "Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1500,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-04', 'W-04 AR Dunning', '={{ $execution.id }}', 'success', '{{ JSON.stringify({count: $node[\"Build Message\"].json.count, message: $node[\"Build Message\"].json.message}) }}'::jsonb)"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      }
+    },
+    {
+      "id": "w04-line",
+      "name": "LINE Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1750,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"AR dunning check complete\" with title \"EA-CTO\" subtitle \"W-04: AR Dunning\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Overdue Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Overdue Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Overdue Invoices": {
+      "main": [
+        [
+          {
+            "node": "Build Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Message": {
+      "main": [
+        [
+          {
+            "node": "Has Overdue?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Overdue?": {
+      "main": [
+        [
+          {
+            "node": "LINE Alert Overdue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LINE Alert Overdue": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Postgres": {
+      "main": [
+        [
+          {
+            "node": "LINE Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

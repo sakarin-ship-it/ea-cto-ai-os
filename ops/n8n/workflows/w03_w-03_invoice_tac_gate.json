@@ -1,0 +1,457 @@
+{
+  "name": "W-03 Invoice TAC Gate",
+  "nodes": [
+    {
+      "id": "w03-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "w03-invoice-tac-static",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "w03-invoice-tac",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "w03-match",
+      "name": "3-Way Match",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8001/match",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\"invoice_id\":{{$json.invoice_id}},\"po_id\":{{$json.po_id}},\"grn_id\":{{$json.grn_id}}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      }
+    },
+    {
+      "id": "w03-if1",
+      "name": "Match OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json.match_status}}",
+              "rightValue": "MATCH",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "w03-tac",
+      "name": "TAC Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1000,
+        150
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8001/tac",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\"invoice_id\":{{$(\"Webhook\").item.json.invoice_id}}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      }
+    },
+    {
+      "id": "w03-if2",
+      "name": "TAC Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1250,
+        150
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond2",
+              "leftValue": "={{$json.tac_approved}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "w03-pay",
+      "name": "Initiate Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1500,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8001/payment/initiate",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\"invoice_id\":{{$(\"Webhook\").item.json.invoice_id}}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dn7dKIPqReyAc7k7",
+          "name": "EA FCI API Key"
+        }
+      }
+    },
+    {
+      "id": "w03-ok",
+      "name": "Status: Payment Initiated",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1750,
+        50
+      ],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "status",
+              "value": "payment_initiated",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "invoice_id",
+              "value": "={{$(\"Webhook\").item.json.invoice_id}}",
+              "type": "number"
+            },
+            {
+              "id": "a3",
+              "name": "workflow_id",
+              "value": "W-03",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "w03-blocked",
+      "name": "Status: TAC Blocked",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1500,
+        250
+      ],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "status",
+              "value": "tac_blocked",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "reason",
+              "value": "={{$json.block_reason}}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "invoice_id",
+              "value": "={{$(\"Webhook\").item.json.invoice_id}}",
+              "type": "number"
+            },
+            {
+              "id": "a4",
+              "name": "workflow_id",
+              "value": "W-03",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "w03-fail",
+      "name": "Status: Match Failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1000,
+        500
+      ],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "status",
+              "value": "match_failed",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "reason",
+              "value": "={{$json.match_status}}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "invoice_id",
+              "value": "={{$(\"Webhook\").item.json.invoice_id}}",
+              "type": "number"
+            },
+            {
+              "id": "a4",
+              "name": "workflow_id",
+              "value": "W-03",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "w03-pg",
+      "name": "Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2250,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-03', 'W-03 Invoice TAC Gate', '{{ $execution.id }}', '{{ $json.status }}', '{{ JSON.stringify($json) }}'::jsonb)",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w03-line",
+      "name": "LINE Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Invoice TAC gate processed \u2014 see match & payment status in n8n\" with title \"EA-CTO\" subtitle \"W-03: Invoice TAC\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "3-Way Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3-Way Match": {
+      "main": [
+        [
+          {
+            "node": "Match OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match OK?": {
+      "main": [
+        [
+          {
+            "node": "TAC Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status: Match Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TAC Check": {
+      "main": [
+        [
+          {
+            "node": "TAC Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TAC Approved?": {
+      "main": [
+        [
+          {
+            "node": "Initiate Payment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status: TAC Blocked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initiate Payment": {
+      "main": [
+        [
+          {
+            "node": "Status: Payment Initiated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Postgres": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Payment Initiated": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: TAC Blocked": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Match Failed": {
+      "main": [
+        [
+          {
+            "node": "Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}

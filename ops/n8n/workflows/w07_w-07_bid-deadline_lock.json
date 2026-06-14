@@ -1,0 +1,339 @@
+{
+  "name": "W-07 Bid-Deadline Lock",
+  "nodes": [
+    {
+      "id": "w07-sched",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtHour": 8,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "w07-wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        480
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "w07-test",
+        "responseMode": "lastNode"
+      },
+      "webhookId": "w07-test-static"
+    },
+    {
+      "id": "w07-pkgs",
+      "name": "Get Packages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8004/packages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "PUBLISHED"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {}
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RH1WdQLyd6TaR2dm",
+          "name": "EA PIP API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w07-filter",
+      "name": "Filter Deadline",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allItems = $input.all();\nconst first = allItems[0]?.json;\nconst pkgs = Array.isArray(first) ? first : (first?.data || (allItems.length > 0 ? allItems.map(i=>i.json) : []));\nconst nowMs = DateTime.now().toMillis();\nconst due = pkgs.filter(p => {\n  const d = DateTime.fromISO(p.submission_deadline).toMillis();\n  return d > nowMs && d < nowMs + 7200000;\n});\nreturn due.length ? due.map(p => ({json: p})) : [{json: {id: null, _noDue: true}}];"
+      }
+    },
+    {
+      "id": "w07-if",
+      "name": "Has Due Package",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json._noDue}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond2",
+              "leftValue": "={{$json.id}}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "w07-lock",
+      "name": "Lock Package",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1250,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:8004/packages/{{$json.id}}/lock",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {}
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RH1WdQLyd6TaR2dm",
+          "name": "EA PIP API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w07-noop",
+      "name": "No Packages Due",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        420
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "w07-summary",
+      "name": "Format Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allItems = $input.all();\nconst locked = allItems.filter(i => i.json && !i.json._noDue && i.json.id !== null && i.json.id !== undefined);\nconst noDue = allItems.some(i => i.json && i.json._noDue);\nconst count = locked.length;\nconst ids = locked.map(i => String(i.json.id || i.json.package_id || '?')).join(', ');\nconst msg = noDue\n  ? 'W-07 Bid-Deadline Lock: no packages due within 2h'\n  : `W-07 Bid-Deadline Lock: locked ${count} package(s) [${ids}]`;\nreturn [{json: {summary: msg, lockedCount: noDue ? 0 : count, lockedIds: noDue ? [] : locked.map(i=>String(i.json.id||i.json.package_id||'?'))}}];"
+      }
+    },
+    {
+      "id": "w07-pg",
+      "name": "Postgres Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1750,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO ea_workflow_log (workflow_id, workflow_name, execution_id, status, payload) VALUES ('W-07', 'W-07 Bid-Deadline Lock', '{{$execution.id}}', 'success', '{{JSON.stringify({summary: $json.summary, lockedCount: $json.lockedCount, lockedIds: $json.lockedIds})}}'::jsonb)"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "JAcUp4C9hXXmw1ix",
+          "name": "EA Postgres"
+        }
+      }
+    },
+    {
+      "id": "w07-line",
+      "name": "LINE Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const { execSync } = require('child_process');\ntry {\n  execSync(`osascript -e 'display notification \"Bid deadline lock check complete\" with title \"EA-CTO\" subtitle \"W-07: Bid Lock\" sound name \"Default\"'`);\n} catch(e) { /* notification non-fatal */ }\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Packages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Packages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Packages": {
+      "main": [
+        [
+          {
+            "node": "Filter Deadline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Deadline": {
+      "main": [
+        [
+          {
+            "node": "Has Due Package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Due Package": {
+      "main": [
+        [
+          {
+            "node": "Lock Package",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Packages Due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Package": {
+      "main": [
+        [
+          {
+            "node": "Format Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Packages Due": {
+      "main": [
+        [
+          {
+            "node": "Format Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Summary": {
+      "main": [
+        [
+          {
+            "node": "Postgres Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Log": {
+      "main": [
+        [
+          {
+            "node": "LINE Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Bangkok",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": true
+}
