@@ -1,14 +1,13 @@
 """Supplier registry — DBD API verification and supplier management."""
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy.orm import Session
 
-from ea_pip.constants import DBD_API_BASE, DBD_API_KEY_ENV, DBDStatus
+from ea_pip.constants import DBD_API_BASE, DBDStatus
 from ea_pip.models import Supplier, append_audit
 
 
@@ -21,34 +20,52 @@ class DBDVerificationResult:
     verified_at: datetime
 
 
-def verify_with_dbd(tax_id: str) -> DBDVerificationResult:
-    """Call Thailand DBD open-data API to verify supplier registration status."""
-    api_key = os.getenv(DBD_API_KEY_ENV, "")
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+# Thai status text → DBDStatus enum
+# Source: openapi.dbd.go.th / OrganizationJuristicStatus field
+_STATUS_MAP: dict[str, DBDStatus] = {
+    "ยังดำเนินกิจการอยู่": DBDStatus.ACTIVE,
+    "เลิก": DBDStatus.REVOKED,
+    "เสร็จชำระบัญชี": DBDStatus.REVOKED,   # liquidation completed
+    "ร้าง": DBDStatus.SUSPENDED,             # dormant / abandoned
+}
 
+
+def _parse_dbd_status(raw: str) -> DBDStatus:
+    return _STATUS_MAP.get(raw.strip(), DBDStatus.UNKNOWN)
+
+
+def verify_with_dbd(tax_id: str) -> DBDVerificationResult:
+    """Call the public DBD open-data API. No API key required.
+
+    Endpoint: GET https://openapi.dbd.go.th/api/v1/juristic_person/{juristicID}
+    The 13-digit Thai TIN is the same as the juristic ID for registered companies.
+    """
     response = httpx.get(
-        f"{DBD_API_BASE}/company/search",
-        params={"taxId": tax_id},
-        headers=headers,
+        f"{DBD_API_BASE}/juristic_person/{tax_id}",
         timeout=15.0,
     )
     response.raise_for_status()
     data = response.json()
 
-    # DBD API response shape: {"juristicId": "...", "juristicNameTh": "...", "status": "..."}
-    item = data.get("data", {}) or {}
-    raw_status = str(item.get("status", "UNKNOWN")).upper()
+    items = data.get("data", [])
+    if not items:
+        # status code 1004 = no data found for this TIN
+        return DBDVerificationResult(
+            tax_id=tax_id,
+            dbd_reg_no="",
+            company_name_th="",
+            status=DBDStatus.UNKNOWN,
+            verified_at=datetime.now(timezone.utc),
+        )
 
-    try:
-        dbd_status = DBDStatus(raw_status)
-    except ValueError:
-        dbd_status = DBDStatus.UNKNOWN
+    person = items[0].get("cd:OrganizationJuristicPerson", {})
+    raw_status = person.get("cd:OrganizationJuristicStatus", "")
 
     return DBDVerificationResult(
         tax_id=tax_id,
-        dbd_reg_no=str(item.get("juristicId", "")),
-        company_name_th=str(item.get("juristicNameTh", "")),
-        status=dbd_status,
+        dbd_reg_no=person.get("cd:OrganizationJuristicID", ""),
+        company_name_th=person.get("cd:OrganizationJuristicNameTH", ""),
+        status=_parse_dbd_status(raw_status),
         verified_at=datetime.now(timezone.utc),
     )
 

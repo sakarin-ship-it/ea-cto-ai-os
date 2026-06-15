@@ -8,8 +8,8 @@ LM_STUDIO_BASE = "http://localhost:1234/v1"
 TECHNICAL_MODEL = "qwen3-8b"
 
 # ── DBD API (Thailand Department of Business Development) ────────────────────
-DBD_API_BASE = "https://opendata.dbd.go.th/api"
-DBD_API_KEY_ENV = "DBD_API_KEY"
+# Public endpoint — no API key required
+DBD_API_BASE = "https://openapi.dbd.go.th/api/v1"
 
 # ── Scoring: 5 evaluation criteria ───────────────────────────────────────────
 CRITERIA = ["technical", "experience", "personnel", "financial", "price"]
