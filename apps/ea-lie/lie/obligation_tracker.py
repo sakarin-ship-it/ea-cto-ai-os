@@ -6,6 +6,8 @@ Low concurrency (2) per M5 memory rules.
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
@@ -88,6 +90,30 @@ class ObligationTracker:
         return task_ids
 
 
+def _obligation_notify(message: str, days_until_due: int) -> None:
+    """iMessage for ≤7 days (urgent); macOS notification for >7 days (normal)."""
+    if days_until_due <= 7:
+        recipient = os.getenv("ALERT_IMESSAGE_RECIPIENT", "")
+        if not recipient:
+            logger.warning("ALERT_IMESSAGE_RECIPIENT not set; skipping iMessage")
+            return
+        script = (
+            'tell application "Messages"\n'
+            f"  send {message!r} to buddy {recipient!r} of service \"iMessage\"\n"
+            "end tell"
+        )
+        try:
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=15.0)
+        except Exception as exc:
+            logger.error("iMessage obligation alert failed: %s", exc)
+    else:
+        script = f'display notification {message!r} with title "EA-LIE Obligation Alert"'
+        try:
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10.0)
+        except Exception as exc:
+            logger.error("macOS notification failed: %s", exc)
+
+
 @celery_app.task(name="lie.send_obligation_alert", bind=True, max_retries=3)
 def send_obligation_alert(
     self,
@@ -95,7 +121,7 @@ def send_obligation_alert(
     days_until_due: int,
     contract_id: str,
 ) -> dict:
-    """Celery task: send obligation reminder notification."""
+    """Celery task: send obligation reminder via iMessage (≤7d) or macOS notification (>7d)."""
     try:
         logger.warning(
             "OBLIGATION ALERT: %s days until due — obligation=%s contract=%s",
@@ -103,7 +129,11 @@ def send_obligation_alert(
             obligation_id,
             contract_id,
         )
-        # TODO: wire to LINE / email / EA-DIS notification channel
+        message = (
+            f"[EA-LIE] Obligation due in {days_until_due} day(s)\n"
+            f"Obligation: {obligation_id}\nContract:   {contract_id}"
+        )
+        _obligation_notify(message, days_until_due)
         return {
             "obligation_id": obligation_id,
             "days_until_due": days_until_due,

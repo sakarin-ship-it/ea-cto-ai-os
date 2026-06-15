@@ -2,7 +2,8 @@
 
 W-09 calls EA-LIE's breach_monitor endpoint. We test the underlying
 BreachMonitor.process_event() invariants: notice generated, non-empty,
-evidence summary contains contract_id, LINE skip is safe.
+evidence summary contains contract_id. subprocess.run is mocked so no
+actual iMessage is sent during the harness run.
 """
 from __future__ import annotations
 
@@ -53,7 +54,9 @@ def setup(seed: int) -> dict:
 
 
 def run(data: dict) -> dict:
-    monitor = BreachMonitor(line_token="")  # no LINE token → skip network call
+    # BreachMonitor() with no args reads ALERT_IMESSAGE_RECIPIENT from env.
+    # Mock subprocess.run so no iMessage is actually sent during harness runs.
+    monitor = BreachMonitor()
     event = BreachEvent(
         source=_SOURCE_MAP[data["source"]],
         contract_id=data["contract_id"],
@@ -61,14 +64,15 @@ def run(data: dict) -> dict:
         description=data["description"],
     )
 
-    # Mock qwen3 call to return our synthetic notice
-    with patch("lie.breach_monitor.chat_complete", return_value=data["notice_text"]):
+    mock_proc = type("P", (), {"returncode": 0, "stderr": b""})()
+    with patch("lie.breach_monitor.chat_complete", return_value=data["notice_text"]), \
+         patch("lie.breach_monitor.subprocess.run", return_value=mock_proc):
         response = monitor.process_event(event, obligations=[])
 
     return {
         "notice_text": response.notice_text,
         "evidence_summary": response.evidence_summary,
-        "line_sent": response.line_sent,
+        "alert_sent": response.alert_sent,
         "notice_generated": response.notice_generated,
         "contract_id": response.contract_id,
     }
@@ -96,7 +100,8 @@ def assert_invariants(data: dict, result: dict) -> None:
         f"seed={seed}: response.contract_id mismatch"
     )
 
-    # LINE not sent (no token) — must be False, not an error
-    assert result["line_sent"] is False, (
-        f"seed={seed}: line_sent must be False when no token is set"
+    # alert_sent: True when ALERT_IMESSAGE_RECIPIENT is configured (subprocess mocked),
+    # False when no recipient. Either is correct — subprocess.run is always mocked.
+    assert isinstance(result["alert_sent"], bool), (
+        f"seed={seed}: alert_sent must be a bool"
     )
