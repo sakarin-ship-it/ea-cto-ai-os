@@ -62,6 +62,11 @@ _SCENARIO_MODULES = [
     "tests.harness.scenarios.n8n_w09",
     "tests.harness.scenarios.n8n_w12",
     "tests.harness.scenarios.integration",
+    # Full API lifecycle scenarios (TestClient + mocked DB/external calls)
+    "tests.harness.scenarios.pip_api_loop",
+    "tests.harness.scenarios.fci_api_loop",
+    "tests.harness.scenarios.dis_api_loop",
+    "tests.harness.scenarios.lie_api_loop",
 ]
 
 
